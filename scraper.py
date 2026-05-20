@@ -5,7 +5,6 @@ from datetime import datetime
 import pytz
 import os
 import xml.etree.ElementTree as ET
-import re
 
 # 1. Cấu hình Múi giờ
 vn_tz = pytz.timezone('Asia/Ho_Chi_Minh')
@@ -33,80 +32,52 @@ def get_world_price():
     except:
         return None
 
-# 3. ĐỘNG CƠ MẠNH HẢI
+# 3. ĐỘNG CƠ BTMH (Áp dụng đúng logic F12 của Forge Master)
 def get_btmh_price():
     try:
         res = scraper.get('https://webgia.com/gia-vang/bao-tin-manh-hai/', timeout=15)
         soup = BeautifulSoup(res.text, 'html.parser')
         
-        elements = soup.find_all(['th', 'td'])
-        found_target = False
-        
-        for el in elements:
-            text = el.get_text().lower()
-            
-            if any(k in text for k in ['hoa sen', 'kim gia bảo']):
-                found_target = True
-                continue
+        # Quét từng dòng <tr> trong bảng
+        for tr in soup.find_all('tr'):
+            # Kiểm tra xem dòng này có chứa thẻ <th> với chữ "Hoa Sen" không
+            th = tr.find('th')
+            if th and 'hoa sen' in th.text.lower():
                 
-            if found_target:
-                digits = re.sub(r'\D', '', text)
-                if digits:
-                    val = float(digits)
-                    
-                    # BỘ LỌC CHỐNG NHIỄU: Xóa bỏ các thông số hàm lượng vàng
-                    if val in [999, 9999, 24, 18, 14, 10]:
-                        continue
+                # NẾU ĐÚNG SẢN PHẨM: Lấy ngay thẻ <td> class "text-right" đầu tiên trong cùng dòng đó (Giá Mua)
+                td = tr.find('td', class_='text-right')
+                if td:
+                    # Bóc tách số thuần túy
+                    raw_text = td.text.strip().replace('.', '').replace(',', '').replace('đ', '')
+                    if raw_text:
+                        val = float(raw_text)
                         
-                    if val < 1000000: val *= 1000
-                    if val > 100000000: val /= 10
-                    
-                    if 5000000 <= val <= 30000000:
-                        print(f"[BTMH] 🎯 Bắt được giá: {val}")
+                        # Quy chuẩn (Nếu Webgia hiển thị 15900 thay vì 15.900.000)
+                        if val < 1000000: val *= 1000
+                        if val > 100000000: val /= 10
+                        
+                        print(f"[BTMH] 🎯 Bắt chuẩn giá từ F12: {val}")
                         return round(val, 0)
         return None
     except Exception as e:
         print(f"[BTMH] Lỗi: {e}")
         return None
 
-# 4. ĐỘNG CƠ HUY THANH
-def get_ht_price():
-    try:
-        res = scraper.get('https://www.huythanhjewelry.vn/', timeout=15)
-        soup = BeautifulSoup(res.text, 'html.parser')
-        
-        tds = soup.find_all('td', class_=lambda c: c and 'text-[#1d2a3d]' in c)
-        for td in tds:
-            digits = re.sub(r'\D', '', td.get_text())
-            if digits:
-                val = float(digits)
-                if val in [999, 9999, 24]: continue
-                if val < 1000000: val *= 1000
-                if val > 100000000: val /= 10
-                if 5000000 <= val <= 30000000:
-                    print(f"[HT] 🎯 Bắt được giá: {val}")
-                    return round(val, 0)
-        return None
-    except Exception as e:
-        return None
-
 world_price = get_world_price()
 btmh_price = get_btmh_price()
-ht_price = get_ht_price()
 
-# 5. CƠ CHẾ LƯU TRỮ BAO DUNG (Chỉ cần Thế giới + 1 Nội địa là ghi mẻ)
-if world_price and (btmh_price or ht_price):
+# 4. GHI DỮ LIỆU
+if world_price and btmh_price:
     file_exists = os.path.isfile('gold_market_log.csv')
     with open('gold_market_log.csv', mode='a', newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
+        
+        # TÔI VẪN GIỮ CỘT HUY THANH BỊ BỎ TRỐNG ĐỂ OBSIDIAN KHÔNG BỊ LỖI DATAVIEW
         if not file_exists:
             writer.writerow(['Date', 'Time', 'WorldPrice', 'BTMHPrice', 'HuyThanhPrice'])
             
-        # Nếu Huy Thanh bị Cloudflare chặn tạm thời, để trống ô đó để không bị lệch cột CSV
-        btmh_csv = btmh_price if btmh_price else ''
-        ht_csv = ht_price if ht_price else ''
+        writer.writerow([date_str, time_str, world_price, btmh_price, ''])
         
-        writer.writerow([date_str, time_str, world_price, btmh_csv, ht_csv])
-    print(f"✅ Ghi thành công: TG={world_price}, BTMH={btmh_price}, HT={ht_price}")
+    print(f"✅ Ghi thành công: TG={world_price}, BTMH={btmh_price}")
 else:
-    print(f"❌ Thất bại: Thiếu dữ liệu mảng rộng (TG={world_price}, BTMH={btmh_price}, HT={ht_price})")
+    print(f"❌ Thất bại: TG={world_price}, BTMH={btmh_price}")
