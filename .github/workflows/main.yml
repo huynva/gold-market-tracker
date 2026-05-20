@@ -2,19 +2,20 @@ name: Gold Price Tracker
 
 on:
   schedule:
-    # Cú pháp Cron: Chạy mỗi 30 phút
     - cron: '*/30 * * * *'
-  workflow_dispatch: # Cho phép anh bấm nút chạy tay để test
+  workflow_dispatch:
 
 jobs:
   scrape-and-update:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # Cấp quyền cho bot được sửa file và push code
+      contents: write
 
     steps:
       - name: Kéo mã nguồn về máy chủ
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # YÊU CẦU LÕI: Kéo toàn bộ lịch sử để chống dội ngược dữ liệu
 
       - name: Cài đặt Python
         uses: actions/setup-python@v5
@@ -33,4 +34,5 @@ jobs:
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
           git add .
           git commit -m "Auto-update giá vàng" || exit 0 
+          git pull --rebase origin main 
           git push
