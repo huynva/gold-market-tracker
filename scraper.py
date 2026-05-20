@@ -5,7 +5,7 @@ from datetime import datetime
 import pytz
 import os
 import xml.etree.ElementTree as ET
-import re  # Nạp module hóa giải Watermark
+import re
 
 # 1. Cấu hình Múi giờ
 vn_tz = pytz.timezone('Asia/Ho_Chi_Minh')
@@ -33,33 +33,36 @@ def get_world_price():
     except:
         return None
 
-# 3. ĐỘNG CƠ BTMH (F12 + Xóa Watermark)
+# 3. ĐỘNG CƠ BTMH (Kết hợp F12 + Chống Nhiễu + Phá Watermark)
 def get_btmh_price():
     try:
         res = scraper.get('https://webgia.com/gia-vang/bao-tin-manh-hai/', timeout=15)
         soup = BeautifulSoup(res.text, 'html.parser')
         
         for tr in soup.find_all('tr'):
-            th = tr.find('th')
-            # Khóa mục tiêu chuẩn xác 100% bằng F12
-            if th and 'hoa sen' in th.text.lower():
+            # BƯỚC 1: NHẬN DIỆN MẶT MỤC TIÊU (Quét toàn bộ chữ trong dòng, không phân biệt th hay td)
+            if 'hoa sen' in tr.get_text().lower():
                 
-                # Quét các ô giá (text-right) nằm cùng dòng
+                # BƯỚC 2: KHÓA TỌA ĐỘ THEO F12 CỦA FORGE MASTER
                 tds = tr.find_all('td', class_='text-right')
                 for td in tds:
-                    # BỘ LỌC WATERMARK: Tiêu diệt chữ "xem tại webgiacom", chỉ giữ lại 15900000
+                    # Gỡ Watermark rác, chỉ giữ lại số
                     digits = re.sub(r'\D', '', td.text)
                     
                     if digits:
                         val = float(digits)
                         
+                        # Bộ lọc chống nhiễu (Đá bay mã vàng 999, 9999)
+                        if val in [999, 9999, 24, 18]:
+                            continue
+                            
                         # Quy chuẩn đơn vị
                         if val < 1000000: val *= 1000
                         if val > 100000000: val /= 10
                         
-                        # Xác thực đây là giá tiền chứ không phải mã lẻ
+                        # Chốt hạ con số chuẩn
                         if 5000000 <= val <= 30000000:
-                            print(f"[BTMH] 🎯 Bắn hạ Watermark, lấy giá chuẩn: {val}")
+                            print(f"[BTMH] 🎯 Bắn hạ thành công: {val}")
                             return round(val, 0)
         return None
     except Exception as e:
@@ -69,13 +72,13 @@ def get_btmh_price():
 world_price = get_world_price()
 btmh_price = get_btmh_price()
 
-# 4. GHI DỮ LIỆU
+# 4. GHI DỮ LIỆU ĐỂ OBSIDIAN ĐỒNG BỘ
 if world_price and btmh_price:
     file_exists = os.path.isfile('gold_market_log.csv')
     with open('gold_market_log.csv', mode='a', newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
         
-        # Giữ nguyên cấu trúc 5 cột cho Obsidian
+        # Cột Huy Thanh được để chuỗi rỗng '' nhằm giữ nguyên cấu trúc 5 cột cho DataviewJS Obsidian
         if not file_exists:
             writer.writerow(['Date', 'Time', 'WorldPrice', 'BTMHPrice', 'HuyThanhPrice'])
             
