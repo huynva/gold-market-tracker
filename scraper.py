@@ -1,4 +1,4 @@
-import requests
+import cloudscraper
 from bs4 import BeautifulSoup
 import csv
 from datetime import datetime
@@ -13,13 +13,15 @@ now = datetime.now(vn_tz)
 date_str = now.strftime('%Y-%m-%d')
 time_str = now.strftime('%H:%M')
 
+# KHỞI TẠO ÁO TÀNG HÌNH ĐỂ XUYÊN QUA WEB INTERMEDIATE
+scraper = cloudscraper.create_scraper(browser={'browser': 'chrome', 'platform': 'windows', 'mobile': False})
+
 def get_world_price():
     try:
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        res_gold = requests.get("https://query1.finance.yahoo.com/v8/finance/chart/GC=F", headers=headers)
+        res_gold = scraper.get("https://query1.finance.yahoo.com/v8/finance/chart/GC=F", timeout=15)
         usd_oz = res_gold.json()['chart']['result'][0]['meta']['regularMarketPrice']
         
-        res_vcb = requests.get("https://portal.vietcombank.com.vn/Usercontrols/TVPortal.TyGia/pXML.aspx", headers=headers)
+        res_vcb = scraper.get("https://portal.vietcombank.com.vn/Usercontrols/TVPortal.TyGia/pXML.aspx", timeout=15)
         root = ET.fromstring(res_vcb.text)
         usd_vnd = None
         for exrate in root.findall('Exrate'):
@@ -31,41 +33,52 @@ def get_world_price():
     except:
         return None
 
-# 3. ĐỘNG CƠ LAI (TÌM TÊN CHUẨN -> VẮT SỐ CHUẨN)
+# 3. ĐỘNG CƠ LAI + CẢM BIẾN X-RAY
 def get_domestic_price(url, brand):
     try:
-        res = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=15)
-        soup = BeautifulSoup(res.text, 'html.parser')
+        res = scraper.get(url, timeout=15)
         
+        # X-Ray 1: Kiểm tra xem Webgia có chặn IP không
+        print(f"[{brand}] Mã phản hồi mạng: {res.status_code}")
+        if res.status_code != 200:
+            return None
+            
+        soup = BeautifulSoup(res.text, 'html.parser')
         tables = soup.find_all('table')
+        
+        # X-Ray 2: Kiểm tra xem có cấu trúc Bảng không
+        if not tables:
+            print(f"[{brand}] ❌ Không tìm thấy thẻ <table> nào! Giao diện web đã bị thay đổi.")
+            return None
+
         for table in tables:
             for row in table.find_all('tr'):
                 row_text = row.get_text().lower()
                 
-                # BƯỚC 1: NHẬN DIỆN MẶT MỤC TIÊU (Loại trừ Vàng Trang Sức, bám sát Hoa Sen/Nhẫn)
+                # Mở rộng từ khóa cho Huy Thanh để tránh web viết tắt
                 if brand == 'BTMH' and 'hoa sen' not in row_text:
                     continue
-                if brand == 'HT' and 'nhẫn' not in row_text:
+                if brand == 'HT' and not any(k in row_text for k in ['nhẫn', '24k', '999']):
                     continue
                     
-                # BƯỚC 2: VẮT SỐ BẰNG TOÁN HỌC (Chỉ áp dụng cho dòng đã khóa mục tiêu)
                 cols = row.find_all(['td', 'th'])
                 if len(cols) >= 2:
-                    for col in cols[1:]: # Bỏ qua cột số 0 chứa cái Tên
+                    for col in cols[1:]: 
                         digits = re.sub(r'\D', '', col.get_text())
                         if digits:
                             val = float(digits)
-                            
-                            # Tự động quy chuẩn đơn vị
                             if val < 1000000: val *= 1000      
                             if val > 100000000: val /= 10      
                             
-                            # Xác thực mốc giá chuẩn
                             if 5000000 <= val <= 30000000:
-                                return round(val, 0) # Rút súng bắn đúng giá Mua vào và té!
+                                # X-Ray 3: Báo cáo đã ngắm trúng mục tiêu nào
+                                print(f"[{brand}] 🎯 Đã vớt được số từ dòng: '{row_text.strip()}' -> Mua vào: {val}")
+                                return round(val, 0)
+                                
+        print(f"[{brand}] ❌ Quét sạch bảng nhưng không tìm thấy từ khóa hợp lệ!")
         return None
     except Exception as e:
-        print(f"Lỗi: {e}")
+        print(f"Lỗi [{brand}]: {e}")
         return None
 
 # Cấp lại tham số truyền mục tiêu
