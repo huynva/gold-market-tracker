@@ -13,9 +13,9 @@ now = datetime.now(vn_tz)
 date_str = now.strftime('%Y-%m-%d')
 time_str = now.strftime('%H:%M')
 
-# KHỞI TẠO ÁO TÀNG HÌNH ĐỂ XUYÊN QUA WEB INTERMEDIATE
 scraper = cloudscraper.create_scraper(browser={'browser': 'chrome', 'platform': 'windows', 'mobile': False})
 
+# 2. ĐỘNG CƠ THẾ GIỚI
 def get_world_price():
     try:
         res_gold = scraper.get("https://query1.finance.yahoo.com/v8/finance/chart/GC=F", timeout=15)
@@ -33,60 +33,68 @@ def get_world_price():
     except:
         return None
 
-# 3. ĐỘNG CƠ LAI + CẢM BIẾN X-RAY
-def get_domestic_price(url, brand):
+# 3. ĐỘNG CƠ MẠNH HẢI (Quét tuần tự bỏ qua ranh giới dòng)
+def get_btmh_price():
     try:
-        res = scraper.get(url, timeout=15)
-        
-        # X-Ray 1: Kiểm tra xem Webgia có chặn IP không
-        print(f"[{brand}] Mã phản hồi mạng: {res.status_code}")
-        if res.status_code != 200:
-            return None
-            
+        res = scraper.get('https://webgia.com/gia-vang/bao-tin-manh-hai/', timeout=15)
         soup = BeautifulSoup(res.text, 'html.parser')
-        tables = soup.find_all('table')
         
-        # X-Ray 2: Kiểm tra xem có cấu trúc Bảng không
-        if not tables:
-            print(f"[{brand}] ❌ Không tìm thấy thẻ <table> nào! Giao diện web đã bị thay đổi.")
-            return None
-
-        for table in tables:
-            for row in table.find_all('tr'):
-                row_text = row.get_text().lower()
+        # Bốc toàn bộ các ô dữ liệu (cả tiêu đề lẫn ô giá) xếp thành 1 hàng dọc
+        elements = soup.find_all(['th', 'td'])
+        found_target = False
+        
+        for el in elements:
+            text = el.get_text().lower()
+            
+            # Kích hoạt trạng thái khi thấy tên vàng
+            if any(k in text for k in ['hoa sen', 'kim gia bảo']):
+                found_target = True
+                continue
                 
-                # Mở rộng từ khóa cho Huy Thanh để tránh web viết tắt
-                if brand == 'BTMH' and 'hoa sen' not in row_text:
-                    continue
-                if brand == 'HT' and not any(k in row_text for k in ['nhẫn', '24k', '999']):
-                    continue
+            # Đã thấy tên rồi, vớt ngay con số ở các ô liền kề phía sau
+            if found_target:
+                digits = re.sub(r'\D', '', text)
+                if digits:
+                    val = float(digits)
+                    if val < 1000000: val *= 1000
+                    if val > 100000000: val /= 10
                     
-                cols = row.find_all(['td', 'th'])
-                if len(cols) >= 2:
-                    for col in cols[1:]: 
-                        digits = re.sub(r'\D', '', col.get_text())
-                        if digits:
-                            val = float(digits)
-                            if val < 1000000: val *= 1000      
-                            if val > 100000000: val /= 10      
-                            
-                            if 5000000 <= val <= 30000000:
-                                # X-Ray 3: Báo cáo đã ngắm trúng mục tiêu nào
-                                print(f"[{brand}] 🎯 Đã vớt được số từ dòng: '{row_text.strip()}' -> Mua vào: {val}")
-                                return round(val, 0)
-                                
-        print(f"[{brand}] ❌ Quét sạch bảng nhưng không tìm thấy từ khóa hợp lệ!")
+                    if 5000000 <= val <= 30000000:
+                        print(f"[BTMH] 🎯 Bắt được giá: {val}")
+                        return round(val, 0)
         return None
     except Exception as e:
-        print(f"Lỗi [{brand}]: {e}")
+        print(f"[BTMH] Lỗi: {e}")
         return None
 
-# Cấp lại tham số truyền mục tiêu
-world_price = get_world_price()
-btmh_price = get_domestic_price('https://webgia.com/gia-vang/bao-tin-manh-hai/', 'BTMH')
-ht_price = get_domestic_price('https://webgia.com/gia-vang/huy-thanh/', 'HT')
+# 4. ĐỘNG CƠ HUY THANH (Bắn tỉa thẳng vào Trang chủ)
+def get_ht_price():
+    try:
+        res = scraper.get('https://www.huythanhjewelry.vn/', timeout=15)
+        soup = BeautifulSoup(res.text, 'html.parser')
+        
+        # Trỏ đúng tọa độ F12 của Forge Master
+        tds = soup.find_all('td', class_=lambda c: c and 'text-[#1d2a3d]' in c)
+        for td in tds:
+            digits = re.sub(r'\D', '', td.get_text())
+            if digits:
+                val = float(digits)
+                if val < 1000000: val *= 1000
+                if val > 100000000: val /= 10
+                if 5000000 <= val <= 30000000:
+                    print(f"[HT] 🎯 Bắt được giá: {val} từ trang chủ!")
+                    return round(val, 0)
+        
+        return None
+    except Exception as e:
+        print(f"[HT] Lỗi: {e}")
+        return None
 
-# 4. GHI DỮ LIỆU
+world_price = get_world_price()
+btmh_price = get_btmh_price()
+ht_price = get_ht_price()
+
+# 5. GHI DỮ LIỆU
 if world_price and btmh_price and ht_price:
     file_exists = os.path.isfile('gold_market_log.csv')
     with open('gold_market_log.csv', mode='a', newline='', encoding='utf-8') as f:
