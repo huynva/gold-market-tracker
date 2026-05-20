@@ -1,4 +1,4 @@
-import requests
+import cloudscraper
 from bs4 import BeautifulSoup
 import csv
 from datetime import datetime
@@ -12,14 +12,16 @@ now = datetime.now(vn_tz)
 date_str = now.strftime('%Y-%m-%d')
 time_str = now.strftime('%H:%M')
 
+# Khởi tạo Áo Tàng Hình (Giả lập trình duyệt Chrome thật để xuyên Cloudflare)
+scraper = cloudscraper.create_scraper(browser={'browser': 'chrome', 'platform': 'windows', 'mobile': False})
+
 # 2. ĐỘNG CƠ TỶ GIÁ THẾ GIỚI
 def get_world_price():
     try:
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        res_gold = requests.get("https://query1.finance.yahoo.com/v8/finance/chart/GC=F", headers=headers)
+        res_gold = scraper.get("https://query1.finance.yahoo.com/v8/finance/chart/GC=F")
         usd_oz = res_gold.json()['chart']['result'][0]['meta']['regularMarketPrice']
         
-        res_vcb = requests.get("https://portal.vietcombank.com.vn/Usercontrols/TVPortal.TyGia/pXML.aspx", headers=headers)
+        res_vcb = scraper.get("https://portal.vietcombank.com.vn/Usercontrols/TVPortal.TyGia/pXML.aspx")
         root = ET.fromstring(res_vcb.text)
         usd_vnd = None
         for exrate in root.findall('Exrate'):
@@ -32,12 +34,11 @@ def get_world_price():
         print(f"Lỗi cào TG: {e}")
         return None
 
-# 3. ĐỘNG CƠ CÀO CHÍNH (Từ Web chủ dựa theo F12)
+# 3. ĐỘNG CƠ CÀO CHÍNH (Xuyên thẳng trang chủ)
 def get_official_price(brand):
-    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
     try:
         if brand == 'HT':
-            res = requests.get("https://www.huythanhjewelry.vn/", headers=headers, timeout=10)
+            res = scraper.get("https://www.huythanhjewelry.vn/", timeout=15)
             soup = BeautifulSoup(res.text, 'html.parser')
             price_td = soup.find('td', class_=lambda c: c and 'text-[#1d2a3d]' in c and 'text-[15px]' in c)
             if price_td:
@@ -46,7 +47,7 @@ def get_official_price(brand):
             return None
             
         elif brand == 'BTMC':
-            res = requests.get("https://btmc.vn/", headers=headers, timeout=10)
+            res = scraper.get("https://btmc.vn/", timeout=15)
             soup = BeautifulSoup(res.text, 'html.parser')
             price_span = soup.find('span', class_=lambda c: c and 'text-text-dark' in c and 'font-semibold' in c)
             if price_span:
@@ -54,24 +55,7 @@ def get_official_price(brand):
                 return round(val / 10, 0) if val > 100000000 else round(val, 0)
             return None
     except Exception as e:
-        print(f"Trang chủ {brand} chặn Bot: {e}")
-        return None
-
-# 4. ĐỘNG CƠ DỰ PHÒNG (Fallback Webgia)
-def get_fallback_price(url):
-    try:
-        res = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'})
-        soup = BeautifulSoup(res.text, 'html.parser')
-        table = soup.find('table')
-        if not table: return None
-        for row in table.find_all('tr'):
-            cols = row.find_all(['td', 'th'])
-            if len(cols) >= 3:
-                buy_val = float(cols[1].text.strip().replace(',', '').replace('.', ''))
-                if buy_val < 1000000: buy_val *= 1000 
-                return round(buy_val / 10, 0) if (buy_val / 10) > 1000000 else None
-        return None
-    except:
+        print(f"Lỗi cào {brand}: {e}")
         return None
 
 # KÍCH HOẠT QUÉT
@@ -79,15 +63,7 @@ world_price = get_world_price()
 btmc_price = get_official_price('BTMC')
 ht_price = get_official_price('HT')
 
-# Rẽ nhánh nếu bị Cloudflare chặn
-if not btmc_price:
-    print("⚠️ Bật radar phụ cho BTMC...")
-    btmc_price = get_fallback_price('https://webgia.com/gia-vang/bao-tin-minh-chau/')
-if not ht_price:
-    print("⚠️ Bật radar phụ cho Huy Thanh...")
-    ht_price = get_fallback_price('https://webgia.com/gia-vang/huy-thanh/')
-
-# 5. GHI DỮ LIỆU
+# 4. GHI DỮ LIỆU THỰC TẾ
 if world_price and btmc_price and ht_price:
     file_exists = os.path.isfile('gold_market_log.csv')
     with open('gold_market_log.csv', mode='a', newline='', encoding='utf-8') as f:
@@ -97,4 +73,4 @@ if world_price and btmc_price and ht_price:
         writer.writerow([date_str, time_str, world_price, btmc_price, ht_price])
     print(f"✅ Ghi thành công: TG={world_price}, BTMC={btmc_price}, HT={ht_price}")
 else:
-    print("❌ Thất bại: Không kéo đủ dữ liệu 3 trục.")
+    print(f"❌ Thất bại: TG={world_price}, BTMC={btmc_price}, HT={ht_price}")
