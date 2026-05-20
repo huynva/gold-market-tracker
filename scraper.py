@@ -31,54 +31,58 @@ def get_world_price():
     except:
         return None
 
-# 3. ĐỘNG CƠ DUAL-SNIPER (Khóa chính xác Cột Mua Vào)
+# 3. ĐỘNG CƠ RADAR TOÀN VÙNG (Quét mọi bảng trên Webgia)
 def get_domestic_price(url, brand):
+    # Trang bị Header xịn để không bị Webgia chặn
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
+    }
     try:
-        res = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=10)
+        res = requests.get(url, headers=headers, timeout=15)
         soup = BeautifulSoup(res.text, 'html.parser')
-        table = soup.find('table')
-        if not table: return None
         
-        for row in table.find_all('tr'):
-            row_text = row.get_text().lower()
-            
-            # Khóa dòng mục tiêu
-            if brand == 'BTMH' and 'hoa sen' not in row_text:
-                continue
-            if brand == 'HT' and 'nhẫn' not in row_text:
-                continue
+        # SỬA LỖI TRÍ MẠNG CHỖ NÀY: Quét TẤT CẢ các bảng (tables) thay vì chỉ bảng đầu tiên
+        tables = soup.find_all('table')
+        
+        for table in tables:
+            for row in table.find_all('tr'):
+                row_text = row.get_text().lower()
                 
-            # Trích xuất toàn bộ các cột chứa số liệu (Bỏ qua cột tên)
-            price_cols = row.find_all('td', class_=lambda c: c and ('text-right' in c or 'text-center' in c or 'text-[#1d2a3d]' in c))
-            
-            # Kế hoạch B nếu web đổi class: Lọc tất cả các td có chứa số
-            if not price_cols:
-                all_tds = row.find_all('td')
-                price_cols = [td for td in all_tds if any(char.isdigit() for char in td.text)]
-                
-            if len(price_cols) >= 1:
-                # price_cols[0] CHÍNH LÀ CỘT MUA VÀO (Thẻ td đầu tiên ngay dưới thẻ Tên)
-                raw_text = price_cols[0].text.strip().replace('đ', '').replace(',', '').replace('.', '')
-                try:
-                    val = float(raw_text)
-                    # Tự động hiệu chỉnh đơn vị
-                    if val < 1000000: val *= 1000      # Nếu web ghi 15900 (Nghìn)
-                    if val > 100000000: val /= 10      # Nếu web ghi 159000000 (Lượng)
+                # Khóa mục tiêu
+                if brand == 'BTMH' and 'hoa sen' not in row_text:
+                    continue
+                if brand == 'HT' and 'nhẫn' not in row_text:
+                    continue
                     
-                    if val > 1000000: 
-                        return round(val, 0)
-                except:
-                    pass
-        return None
-    except:
+                # Rà soát tất cả các cột td trong dòng mục tiêu
+                price_cols = row.find_all('td')
+                
+                for col in price_cols:
+                    # Làm sạch mọi ký tự thừa (đ, dấu chấm, phẩy, khoảng trắng)
+                    raw_text = col.text.strip().replace('đ', '').replace(',', '').replace('.', '')
+                    
+                    # Nếu nội dung còn lại là một con số thuần túy
+                    if raw_text.isdigit():
+                        val = float(raw_text)
+                        # Bộ lọc quy chuẩn (Ngàn -> Triệu -> Lượng)
+                        if val < 1000000: val *= 1000      
+                        if val > 100000000: val /= 10      
+                        
+                        if val > 1000000: 
+                            return round(val, 0) # Trả về ngay con số MUA VÀO (cột đầu tiên) và ngắt radar
+                            
+        return None # Nếu quét sạch sành sanh các bảng mà không thấy
+    except Exception as e:
+        print(f"Lỗi {brand}: {e}")
         return None
 
-# Kích hoạt trạm quét
+# Kích hoạt hệ thống
 world_price = get_world_price()
 btmh_price = get_domestic_price('https://webgia.com/gia-vang/bao-tin-manh-hai/', 'BTMH')
 ht_price = get_domestic_price('https://webgia.com/gia-vang/huy-thanh/', 'HT')
 
-# 4. GHI DỮ LIỆU ĐỒNG BỘ
+# 4. GHI DỮ LIỆU
 if world_price and btmh_price and ht_price:
     file_exists = os.path.isfile('gold_market_log.csv')
     with open('gold_market_log.csv', mode='a', newline='', encoding='utf-8') as f:
