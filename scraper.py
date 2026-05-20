@@ -1,4 +1,4 @@
-import cloudscraper
+import requests
 from bs4 import BeautifulSoup
 import csv
 from datetime import datetime
@@ -12,58 +12,78 @@ now = datetime.now(vn_tz)
 date_str = now.strftime('%Y-%m-%d')
 time_str = now.strftime('%H:%M')
 
-# Khởi tạo Áo Tàng Hình (Giả lập trình duyệt Chrome thật để xuyên Cloudflare)
-scraper = cloudscraper.create_scraper(browser={'browser': 'chrome', 'platform': 'windows', 'mobile': False})
-
-# 2. ĐỘNG CƠ TỶ GIÁ THẾ GIỚI
+# 2. ĐỘNG CƠ TỶ GIÁ THẾ GIỚI VÀ VIETCOMBANK
 def get_world_price():
     try:
-        res_gold = scraper.get("https://query1.finance.yahoo.com/v8/finance/chart/GC=F")
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        res_gold = requests.get("https://query1.finance.yahoo.com/v8/finance/chart/GC=F", headers=headers)
         usd_oz = res_gold.json()['chart']['result'][0]['meta']['regularMarketPrice']
         
-        res_vcb = scraper.get("https://portal.vietcombank.com.vn/Usercontrols/TVPortal.TyGia/pXML.aspx")
+        res_vcb = requests.get("https://portal.vietcombank.com.vn/Usercontrols/TVPortal.TyGia/pXML.aspx", headers=headers)
         root = ET.fromstring(res_vcb.text)
         usd_vnd = None
         for exrate in root.findall('Exrate'):
             if exrate.get('CurrencyCode') == 'USD':
-                usd_vnd = float(exrate.get('Sell').replace(',', '').replace('.', ''))
+                # Chỉ xóa dấu phẩy, giữ lại dấu chấm thập phân
+                usd_vnd = float(exrate.get('Sell').replace(',', ''))
                 break
+        
         if usd_vnd:
-            return round((usd_oz * usd_vnd) / 8.29426, 0)
+            price_vnd_chi = (usd_oz * usd_vnd) / 8.29426
+            return round(price_vnd_chi, 0)
     except Exception as e:
         print(f"Lỗi cào TG: {e}")
         return None
 
-# 3. ĐỘNG CƠ CÀO CHÍNH (Xuyên thẳng trang chủ)
-def get_official_price(brand):
+# 3. ĐỘNG CƠ BẮN TỈA TỪNG LOẠI VÀNG CỤ THỂ
+def get_domestic_price(url, brand):
     try:
-        if brand == 'HT':
-            res = scraper.get("https://www.huythanhjewelry.vn/", timeout=15)
-            soup = BeautifulSoup(res.text, 'html.parser')
-            price_td = soup.find('td', class_=lambda c: c and 'text-[#1d2a3d]' in c and 'text-[15px]' in c)
-            if price_td:
-                val = float(price_td.text.replace('đ', '').replace('.', '').replace(',', '').strip())
-                return round(val / 10, 0) if val > 100000000 else round(val, 0)
-            return None
+        res = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=10)
+        soup = BeautifulSoup(res.text, 'html.parser')
+        table = soup.find('table')
+        if not table: return None
+        
+        for row in table.find_all('tr'):
+            row_text = row.get_text().lower()
             
-        elif brand == 'BTMC':
-            res = scraper.get("https://btmc.vn/", timeout=15)
-            soup = BeautifulSoup(res.text, 'html.parser')
-            price_span = soup.find('span', class_=lambda c: c and 'text-text-dark' in c and 'font-semibold' in c)
-            if price_span:
-                val = float(price_span.text.replace('đ', '').replace('.', '').replace(',', '').strip())
-                return round(val / 10, 0) if val > 100000000 else round(val, 0)
-            return None
+            # Khóa mục tiêu 1: Nếu là BTMC, phải tìm đúng dòng chữ "kim gia bảo" hoặc "thăng long"
+            if brand == 'BTMC' and 'kim gia bảo' not in row_text and 'thăng long' not in row_text:
+                continue
+                
+            # Khóa mục tiêu 2: Nếu là Huy Thanh, tìm dòng chữ "nhẫn"
+            if brand == 'HT' and 'nhẫn' not in row_text:
+                continue
+                
+            # Dựa vào F12 của Forge Master: Bắt thẻ td có class "text-right"
+            price_cols = row.find_all('td', class_='text-right')
+            
+            # Nếu web đổi class, dùng phương án dự phòng lấy tất cả td
+            if not price_cols:
+                price_cols = row.find_all('td')
+                
+            if len(price_cols) >= 1:
+                # Cột giá đầu tiên luôn là MUA VÀO
+                raw_text = price_cols[0].text.strip().replace(',', '').replace('.', '')
+                try:
+                    val = float(raw_text)
+                    if val < 1000000: val *= 1000
+                    if val > 100000000: val /= 10
+                    
+                    if val > 1000000: 
+                        return round(val, 0)
+                except:
+                    continue
+        return None
     except Exception as e:
-        print(f"Lỗi cào {brand}: {e}")
+        print(f"Lỗi cào Nội địa: {e}")
         return None
 
-# KÍCH HOẠT QUÉT
+# Kích hoạt hệ thống quét (Đã truyền thêm tham số Tên thương hiệu để khóa mục tiêu)
 world_price = get_world_price()
-btmc_price = get_official_price('BTMC')
-ht_price = get_official_price('HT')
+btmc_price = get_domestic_price('https://webgia.com/gia-vang/bao-tin-minh-chau/', 'BTMC')
+ht_price = get_domestic_price('https://webgia.com/gia-vang/huy-thanh/', 'HT')
 
-# 4. GHI DỮ LIỆU THỰC TẾ
+# 4. GHI DỮ LIỆU
 if world_price and btmc_price and ht_price:
     file_exists = os.path.isfile('gold_market_log.csv')
     with open('gold_market_log.csv', mode='a', newline='', encoding='utf-8') as f:
