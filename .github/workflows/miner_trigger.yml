@@ -1,0 +1,27 @@
+name: Manual History Miner Trigger
+
+on:
+  workflow_dispatch: # Chỉ chạy khi anh bấm nút
+
+permissions:
+  contents: write
+
+jobs:
+  mine:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Run Miner
+        run: python historical_miner.py
+      - name: Commit history
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "Nạp dữ liệu lịch sử 1 năm thành công"
+          file_pattern: "gold_market_log.csv"
