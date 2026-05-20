@@ -1,35 +1,34 @@
-name: Gold Price Tracker
+name: Gold Price Tracker 1h
 
 on:
   schedule:
-    - cron: '*/30 * * * *'
-  workflow_dispatch:
+    - cron: '0 * * * *' # QUAN TRỌNG: Lệnh này ép cỗ máy tự chạy vào phút thứ 0 của mỗi tiếng
+  workflow_dispatch: # Cho phép anh bấm nút tự chạy thủ công bất cứ lúc nào để kiểm tra
+
+permissions:
+  contents: write # BẮT BUỘC: Cấp quyền tối cao cho con Bot được ghi dữ liệu vào file .csv
 
 jobs:
   scrape-and-update:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
     steps:
-      - name: Kéo mã nguồn về máy chủ
+      - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      - name: Cài đặt Python
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      - name: Cài đặt thư viện
-        run: pip install -r requirements.txt
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
 
-      - name: Chạy động cơ cào dữ liệu
+      - name: Run Scraper
         run: python scraper.py
 
-      - name: Trạm gộp dữ liệu tự động (Chống đụng độ)
+      - name: Commit and Push changes
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "Auto-update giá vàng"
+          commit_message: "Auto-update giá vàng theo giờ"
           file_pattern: "gold_market_log.csv"
