@@ -31,7 +31,7 @@ def get_world_price():
     except:
         return None
 
-# 3. ĐỘNG CƠ DUAL-SNIPER (Khóa mục tiêu chuẩn xác cho cả BTMH và Huy Thanh)
+# 3. ĐỘNG CƠ DUAL-SNIPER (Khóa chính xác Cột Mua Vào)
 def get_domestic_price(url, brand):
     try:
         res = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=10)
@@ -42,26 +42,29 @@ def get_domestic_price(url, brand):
         for row in table.find_all('tr'):
             row_text = row.get_text().lower()
             
-            # Khóa mục tiêu BTMH: Tìm đúng dòng Nhẫn tròn / Đồng xu Hoa Sen
+            # Khóa dòng mục tiêu
             if brand == 'BTMH' and 'hoa sen' not in row_text:
                 continue
-                
-            # Khóa mục tiêu Huy Thanh: Tìm đúng dòng Nhẫn tròn
             if brand == 'HT' and 'nhẫn' not in row_text:
                 continue
                 
-            # Bộ lọc thông minh: Quét cả 'text-right' (Mạnh Hải) và 'text-center'/'text-[#1d2a3d]' (Huy Thanh)
+            # Trích xuất toàn bộ các cột chứa số liệu (Bỏ qua cột tên)
             price_cols = row.find_all('td', class_=lambda c: c and ('text-right' in c or 'text-center' in c or 'text-[#1d2a3d]' in c))
+            
+            # Kế hoạch B nếu web đổi class: Lọc tất cả các td có chứa số
             if not price_cols:
-                price_cols = row.find_all('td')
+                all_tds = row.find_all('td')
+                price_cols = [td for td in all_tds if any(char.isdigit() for char in td.text)]
                 
             if len(price_cols) >= 1:
-                # Giá mua vào luôn nằm ở cột dữ liệu số đầu tiên tìm thấy
+                # price_cols[0] CHÍNH LÀ CỘT MUA VÀO (Thẻ td đầu tiên ngay dưới thẻ Tên)
                 raw_text = price_cols[0].text.strip().replace('đ', '').replace(',', '').replace('.', '')
                 try:
                     val = float(raw_text)
-                    if val < 1000000: val *= 1000
-                    if val > 100000000: val /= 10
+                    # Tự động hiệu chỉnh đơn vị
+                    if val < 1000000: val *= 1000      # Nếu web ghi 15900 (Nghìn)
+                    if val > 100000000: val /= 10      # Nếu web ghi 159000000 (Lượng)
+                    
                     if val > 1000000: 
                         return round(val, 0)
                 except:
@@ -70,12 +73,12 @@ def get_domestic_price(url, brand):
     except:
         return None
 
-# Kích hoạt trạm quét ly tâm
+# Kích hoạt trạm quét
 world_price = get_world_price()
 btmh_price = get_domestic_price('https://webgia.com/gia-vang/bao-tin-manh-hai/', 'BTMH')
 ht_price = get_domestic_price('https://webgia.com/gia-vang/huy-thanh/', 'HT')
 
-# 4. GHI DỮ LIỆU ĐỒNG BỘ ĐỂ ĐẨY VỀ OBSIDIAN
+# 4. GHI DỮ LIỆU ĐỒNG BỘ
 if world_price and btmh_price and ht_price:
     file_exists = os.path.isfile('gold_market_log.csv')
     with open('gold_market_log.csv', mode='a', newline='', encoding='utf-8') as f:
@@ -85,4 +88,4 @@ if world_price and btmh_price and ht_price:
         writer.writerow([date_str, time_str, world_price, btmh_price, ht_price])
     print(f"✅ Ghi thành công: TG={world_price}, BTMH={btmh_price}, HT={ht_price}")
 else:
-    print(f"❌ Thất bại cấu trúc: TG={world_price}, BTMH={btmh_price}, HT={ht_price}")
+    print(f"❌ Thất bại: TG={world_price}, BTMH={btmh_price}, HT={ht_price}")
