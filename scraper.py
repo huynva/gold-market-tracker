@@ -31,7 +31,7 @@ def get_world_price():
     except:
         return None
 
-# 3. ĐỘNG CƠ BẮN TỈA BTMH VÀ HUY THANH
+# 3. ĐỘNG CƠ DUAL-SNIPER (Khóa mục tiêu chuẩn xác cho cả BTMH và Huy Thanh)
 def get_domestic_price(url, brand):
     try:
         res = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=10)
@@ -42,22 +42,22 @@ def get_domestic_price(url, brand):
         for row in table.find_all('tr'):
             row_text = row.get_text().lower()
             
-            # KHÓA MỤC TIÊU 1: BTMH - Tìm đúng Đồng vàng Kim Gia Bảo Hoa Sen
+            # Khóa mục tiêu BTMH: Tìm đúng dòng Nhẫn tròn / Đồng xu Hoa Sen
             if brand == 'BTMH' and 'hoa sen' not in row_text:
                 continue
                 
-            # KHÓA MỤC TIÊU 2: HT - Tìm nhẫn
+            # Khóa mục tiêu Huy Thanh: Tìm đúng dòng Nhẫn tròn
             if brand == 'HT' and 'nhẫn' not in row_text:
                 continue
                 
-            # Dựa vào F12 của Forge Master: Bắt thẻ td có class "text-right"
-            price_cols = row.find_all('td', class_='text-right')
+            # Bộ lọc thông minh: Quét cả 'text-right' (Mạnh Hải) và 'text-center'/'text-[#1d2a3d]' (Huy Thanh)
+            price_cols = row.find_all('td', class_=lambda c: c and ('text-right' in c or 'text-center' in c or 'text-[#1d2a3d]' in c))
             if not price_cols:
                 price_cols = row.find_all('td')
                 
             if len(price_cols) >= 1:
-                # Giá Mua Vào luôn nằm ở cột số đầu tiên
-                raw_text = price_cols[0].text.strip().replace(',', '').replace('.', '')
+                # Giá mua vào luôn nằm ở cột dữ liệu số đầu tiên tìm thấy
+                raw_text = price_cols[0].text.strip().replace('đ', '').replace(',', '').replace('.', '')
                 try:
                     val = float(raw_text)
                     if val < 1000000: val *= 1000
@@ -70,12 +70,12 @@ def get_domestic_price(url, brand):
     except:
         return None
 
-# Kích hoạt hệ thống quét 
+# Kích hoạt trạm quét ly tâm
 world_price = get_world_price()
 btmh_price = get_domestic_price('https://webgia.com/gia-vang/bao-tin-manh-hai/', 'BTMH')
 ht_price = get_domestic_price('https://webgia.com/gia-vang/huy-thanh/', 'HT')
 
-# 4. GHI DỮ LIỆU
+# 4. GHI DỮ LIỆU ĐỒNG BỘ ĐỂ ĐẨY VỀ OBSIDIAN
 if world_price and btmh_price and ht_price:
     file_exists = os.path.isfile('gold_market_log.csv')
     with open('gold_market_log.csv', mode='a', newline='', encoding='utf-8') as f:
@@ -85,4 +85,4 @@ if world_price and btmh_price and ht_price:
         writer.writerow([date_str, time_str, world_price, btmh_price, ht_price])
     print(f"✅ Ghi thành công: TG={world_price}, BTMH={btmh_price}, HT={ht_price}")
 else:
-    print(f"❌ Thất bại: TG={world_price}, BTMH={btmh_price}, HT={ht_price}")
+    print(f"❌ Thất bại cấu trúc: TG={world_price}, BTMH={btmh_price}, HT={ht_price}")
