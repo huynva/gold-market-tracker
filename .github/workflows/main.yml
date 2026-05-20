@@ -15,7 +15,7 @@ jobs:
       - name: Kéo mã nguồn về máy chủ
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # YÊU CẦU LÕI: Kéo toàn bộ lịch sử để chống dội ngược dữ liệu
+          fetch-depth: 0
 
       - name: Cài đặt Python
         uses: actions/setup-python@v5
@@ -28,11 +28,8 @@ jobs:
       - name: Chạy động cơ cào dữ liệu
         run: python scraper.py
 
-      - name: Commit và Đẩy file CSV mới lên Repo
-        run: |
-          git config --global user.name 'github-actions[bot]'
-          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
-          git add .
-          git commit -m "Auto-update giá vàng" || exit 0 
-          git pull --rebase origin main 
-          git push
+      - name: Trạm gộp dữ liệu tự động (Chống đụng độ)
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "Auto-update giá vàng"
+          file_pattern: "gold_market_log.csv"
