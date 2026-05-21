@@ -14,10 +14,11 @@ time_str = now.strftime('%H:%M')
 
 scraper = cloudscraper.create_scraper(browser={'browser': 'chrome', 'platform': 'windows', 'mobile': False})
 
-# 2. ĐỘNG CƠ THẾ GIỚI
+# 2. ĐỘNG CƠ THẾ GIỚI (Đã tối ưu XAU/USD & Tỷ giá dự phòng)
 def get_world_price():
     try:
-        res_gold = scraper.get("https://query1.finance.yahoo.com/v8/finance/chart/GC=F", timeout=20)
+        # Lấy giá Vàng giao ngay (XAUUSD=X) thay vì Hợp đồng tương lai
+        res_gold = scraper.get("https://query1.finance.yahoo.com/v8/finance/chart/XAUUSD=X", timeout=20)
         
         if res_gold.status_code != 200:
             print(f"[TG] Bị Yahoo chặn. Mã lỗi: {res_gold.status_code}")
@@ -25,18 +26,23 @@ def get_world_price():
             
         usd_oz = res_gold.json()['chart']['result'][0]['meta']['regularMarketPrice']
         
-        res_vcb = scraper.get("https://portal.vietcombank.com.vn/Usercontrols/TVPortal.TyGia/pXML.aspx", timeout=20)
-        root = ET.fromstring(res_vcb.text)
-        usd_vnd = None
-        for exrate in root.findall('Exrate'):
-            if exrate.get('CurrencyCode') == 'USD':
-                usd_vnd = float(exrate.get('Sell').replace(',', ''))
-                break
-                
-        if usd_vnd:
-            return round((usd_oz * usd_vnd) / 8.29426, 0)
+        # Thiết lập tỷ giá dự phòng phòng khi Vietcombank bảo trì
+        usd_vnd = 25450 
+        try:
+            res_vcb = scraper.get("https://portal.vietcombank.com.vn/Usercontrols/TVPortal.TyGia/pXML.aspx", timeout=20)
+            root = ET.fromstring(res_vcb.text)
+            for exrate in root.findall('Exrate'):
+                if exrate.get('CurrencyCode') == 'USD':
+                    usd_vnd = float(exrate.get('Sell').replace(',', ''))
+                    break
+        except Exception as e_vcb:
+            print(f"[TG] Cảnh báo: API VCB gián đoạn. Đã dùng tỷ giá dự phòng 25,450. Lỗi: {e_vcb}")
+            
+        # Quy đổi USD/Ounce sang VNĐ/Chỉ
+        return round((usd_oz * usd_vnd) / 8.29426, 0)
+        
     except Exception as e:
-        print(f"[TG] Lỗi: {e}")
+        print(f"[TG] Lỗi Động cơ Thế giới: {e}")
         return None
 
 # 3. ĐỘNG CƠ API BTMC (Khóa mục tiêu tuyệt đối)
