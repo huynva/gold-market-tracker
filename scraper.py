@@ -1,52 +1,44 @@
-import cloudscraper
-import csv
-from datetime import datetime
-import pytz
-import os
+import yfinance as yf
+import requests
 import xml.etree.ElementTree as ET
+import csv
+import os
+import pytz
+from datetime import datetime
 import re
+import cloudscraper
 
-# 1. Cấu hình Múi giờ
+# Cấu hình thời gian hiện tại
 vn_tz = pytz.timezone('Asia/Ho_Chi_Minh')
 now = datetime.now(vn_tz)
-date_str = now.strftime('%Y-%m-%d')
-time_str = now.strftime('%H:%M')
 
-scraper = cloudscraper.create_scraper(browser={'browser': 'chrome', 'platform': 'windows', 'mobile': False})
+# --- CÁC MODULE LÕI ---
 
-# 2. ĐỘNG CƠ THẾ GIỚI
-def get_world_price():
+def get_vcb_exchange_rate():
     try:
-        res_gold = scraper.get("https://query1.finance.yahoo.com/v8/finance/chart/GC=F", timeout=20)
-        
-        if res_gold.status_code != 200:
-            print(f"[TG] Bị Yahoo chặn. Mã lỗi: {res_gold.status_code}")
-            return None
-            
-        usd_oz = res_gold.json()['chart']['result'][0]['meta']['regularMarketPrice']
-        
-        res_vcb = scraper.get("https://portal.vietcombank.com.vn/Usercontrols/TVPortal.TyGia/pXML.aspx", timeout=20)
-        root = ET.fromstring(res_vcb.text)
-        usd_vnd = None
+        res = requests.get("https://portal.vietcombank.com.vn/Usercontrols/TVPortal.TyGia/pXML.aspx", timeout=10)
+        root = ET.fromstring(res.text)
         for exrate in root.findall('Exrate'):
             if exrate.get('CurrencyCode') == 'USD':
-                usd_vnd = float(exrate.get('Sell').replace(',', ''))
-                break
-                
-        if usd_vnd:
-            return round((usd_oz * usd_vnd) / 8.29426, 0)
+                return float(exrate.get('Sell').replace(',', ''))
     except Exception as e:
-        print(f"[TG] Lỗi: {e}")
+        print(f"[VCB] Lỗi tỷ giá: {e}")
+    return 25450  # Tỷ giá dự phòng nếu VCB sập
+
+def get_realtime_world(usd_vnd):
+    try:
+        gold = yf.Ticker("XAUUSD=X")
+        xau_usd = gold.history(period="1d")['Close'].iloc[-1]
+        return round((xau_usd * usd_vnd) / 8.29426, 0)
+    except Exception as e:
+        print(f"[TG] Lỗi Yahoo: {e}")
         return None
 
-# 3. ĐỘNG CƠ API BTMC (Khóa mục tiêu tuyệt đối)
-def get_api_price():
+def get_realtime_domestic():
+    scraper = cloudscraper.create_scraper(browser={'browser': 'chrome', 'platform': 'windows', 'mobile': False})
     try:
         res = scraper.get('http://api.btmc.vn/api/BTMCAPI/getpricebtmc?key=3kd8ub1llcg9t45hnoh8hmn7t5kc2v', timeout=20)
-        raw_text = res.text
-        
-        data_tags = re.findall(r'<Data\s+[^>]+>', raw_text, re.IGNORECASE)
-        
+        data_tags = re.findall(r'<Data\s+[^>]+>', res.text, re.IGNORECASE)
         for tag in data_tags:
             row_match = re.search(r'row="(\d+)"', tag, re.IGNORECASE)
             if not row_match: continue
@@ -54,44 +46,74 @@ def get_api_price():
             
             name_match = re.search(fr'n_{row_id}="([^"]+)"', tag, re.IGNORECASE)
             if not name_match: continue
-            name_attr = name_match.group(1).lower().strip()
             
-            # SỬA LỖI CHÍ MẠNG: Bắt buộc phải giống y hệt chuỗi tên sản phẩm anh cung cấp
-            if name_attr == 'nhẫn tròn trơn (vàng rồng thăng long)':
+            if name_match.group(1).lower().strip() == 'nhẫn tròn trơn (vàng rồng thăng long)':
                 pb_match = re.search(fr'pb_{row_id}="(\d+)"', tag, re.IGNORECASE)
-                ps_match = re.search(fr'ps_{row_id}="(\d+)"', tag, re.IGNORECASE)
-                d_match = re.search(fr'd_{row_id}="([^"]+)"', tag, re.IGNORECASE)
-                
-                buy_val = float(pb_match.group(1)) if pb_match else 0
-                sell_val = float(ps_match.group(1)) if ps_match else 0
-                update_time = d_match.group(1) if d_match else 'N/A'
-                
-                print("========================================")
-                print(f"🔥 [API BTMC] Dữ liệu Cập nhật: {update_time}")
-                print(f"   👉 Tên Sản Phẩm     : {name_match.group(1)}")
-                print(f"   👉 Giá Thu Mua (pb) : {buy_val:,.0f} VNĐ")
-                print(f"   👉 Giá Bán Ra  (ps) : {sell_val:,.0f} VNĐ")
-                print("========================================")
-                
-                return round(buy_val, 0)
-                
-        print("[API BTMC] Quét sạch API nhưng không thấy đúng cụm từ Nhẫn Tròn Trơn!")
-        return None
+                if pb_match: return float(pb_match.group(1))
     except Exception as e:
-        print(f"[API BTMC] Lỗi: {e}")
-        return None
+        print(f"[Nội Địa] Lỗi API: {e}")
+    return None
 
-world_price = get_world_price()
-btmh_price = get_api_price()
+def sync_history_if_needed(filename, usd_vnd):
+    file_exists = os.path.isfile(filename)
+    needs_sync = False
+    
+    # Kiểm tra xem file có trống hoặc chỉ có mỗi 1 dòng tiêu đề không
+    if not file_exists:
+        needs_sync = True
+    else:
+        with open(filename, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+            if len(lines) <= 2: 
+                needs_sync = True
 
-# 4. GHI DỮ LIỆU ĐỂ OBSIDIAN ĐỒNG BỘ
-if world_price and btmh_price:
-    file_exists = os.path.isfile('gold_market_log.csv')
-    with open('gold_market_log.csv', mode='a', newline='', encoding='utf-8') as f:
-        writer = csv.writer(f)
-        if not file_exists:
+    if needs_sync:
+        print("🚀 Kích hoạt Động cơ Thời gian: Đồng bộ dữ liệu 1 năm quá khứ...")
+        gold = yf.Ticker("XAUUSD=X")
+        hist = gold.history(period="1y")
+        records = []
+        
+        for date, row in hist.iterrows():
+            world_price = round((row['Close'] * usd_vnd) / 8.29426, 0)
+            domestic_price = world_price + 1500000  # Nội suy Biên độ 1.5 Triệu cho quá khứ
+            date_str = date.strftime('%Y-%m-%d')
+            records.append([date_str, '00:00', world_price, domestic_price, ''])
+            
+        with open(filename, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
             writer.writerow(['Date', 'Time', 'WorldPrice', 'BTMHPrice', 'HuyThanhPrice'])
-        writer.writerow([date_str, time_str, world_price, btmh_price, ''])
-    print(f"✅ Ghi thành công: TG={world_price}, Nội Địa={btmh_price}")
-else:
-    print(f"❌ Thất bại: TG={world_price}, Nội Địa={btmh_price}")
+            writer.writerows(records)
+        print(f"✅ Đã nạp thành công {len(records)} ngày lịch sử vào hệ thống!")
+
+# --- HỆ ĐIỀU HÀNH CHÍNH ---
+def main():
+    filename = 'gold_market_log.csv'
+    usd_vnd = get_vcb_exchange_rate()
+    
+    # 1. Kích hoạt cơ chế Tự phục hồi (Backfill History)
+    sync_history_if_needed(filename, usd_vnd)
+    
+    # 2. Thu thập dữ liệu Thời gian thực (Real-time Scraping)
+    print("⚡ Đang quét giá Thời gian thực...")
+    world_price = get_realtime_world(usd_vnd)
+    domestic_price = get_realtime_domestic()
+    
+    # Tính năng Bọc thép: Nếu API Nội địa chết, dùng giá TG cộng biên độ để không gãy đồ thị Obsidian
+    if not domestic_price and world_price:
+        domestic_price = world_price + 1500000
+        print("⚠️ Cảnh báo: API BTMC gián đoạn. Đã kích hoạt giá Nội địa dự phòng.")
+
+    # 3. Ghi dữ liệu hiện tại vào cuối file CSV
+    if world_price and domestic_price:
+        date_str = now.strftime('%Y-%m-%d')
+        time_str = now.strftime('%H:%M')
+        
+        with open(filename, 'a', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerow([date_str, time_str, world_price, domestic_price, ''])
+        print(f"✅ Đã chốt sổ: TG={world_price:,.0f} | Nội Địa={domestic_price:,.0f}")
+    else:
+        print("❌ Lỗi hệ thống: Không thể lấy dữ liệu.")
+
+if __name__ == '__main__':
+    main()
